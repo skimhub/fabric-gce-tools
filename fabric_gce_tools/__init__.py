@@ -60,7 +60,7 @@ def _get_zone_flag_name():
     return "--instances-zone"
 
 
-def _build_instances_index(data):
+def _build_instances_index(data, public_ips=True):
     global INSTANCES_NAME_INDEX
     global INSTANCES_IP_INDEX
     global INSTANCES_CACHE
@@ -79,13 +79,17 @@ def _build_instances_index(data):
                                                          instance["instance"].split("/")[-3]), shell=True)
             instanceData = json.loads(raw_instance_data)
 
-        ip = instanceData.get("networkInterfaces", [{}])[0].get("accessConfigs", [{}])[0].get("natIP", None)
+        if public_ips:
+            ip = instanceData.get("networkInterfaces", [{}])[0].get("accessConfigs", [{}])[0].get("natIP", None)
+        else:
+            ip = instanceData.get("networkInterfaces", [{}])[0].get("networkIP", None)
+
         if ip and not ip in INSTANCES_IP_INDEX:
             INSTANCES_IP_INDEX[ip] = instanceData
             allInstanceData.append(instanceData)
     INSTANCES_CACHE = allInstanceData
 
-def _get_data(use_cache, cache_expiration, group_name=None, region=None, zone=None):
+def _get_data(use_cache, cache_expiration, group_name=None, region=None, zone=None, public_ips=True):
     global INSTANCES_CACHE
 
     loaded_cache = False
@@ -132,10 +136,10 @@ def _get_data(use_cache, cache_expiration, group_name=None, region=None, zone=No
         else:
             raw_data = subprocess.check_output("gcloud compute instances list --format=json", shell=True)
             data = json.loads(raw_data)
-    _build_instances_index(data)
+    _build_instances_index(data, public_ips)
     return data
 
-def _get_roles(data):
+def _get_roles(data, public_ips=True):
     roles = {}
     for i in data:
         if "tags" in i and i["tags"] and "items" in i["tags"]:
@@ -144,7 +148,11 @@ def _get_roles(data):
                 if not role in roles:
                     roles[role] = []
 
-                address = i.get("networkInterfaces", [{}])[0].get("accessConfigs", [{}])[0].get("natIP", None)
+                if public_ips:
+                    address = i.get("networkInterfaces", [{}])[0].get("accessConfigs", [{}])[0].get("natIP", None)
+                else:
+                    address = i.get("networkInterfaces", [{}])[0].get("networkIP", None)
+
                 if address and not address in roles[role]:
                     roles[role].append(address)
 
@@ -202,7 +210,7 @@ def target_pool_add_instance(target_pool_name, instance_name, instance_zone):
 def target_pool_remove_instance(target_pool_name, instance_name, instance_zone):
     raw_data = subprocess.check_output("gcloud compute target-pools remove-instances {target_pool} --instances {instance_name} {zone_flag} {zone} --format json".format(target_pool=target_pool_name, instance_name=instance_name, zone_flag=_get_zone_flag_name(), zone=instance_zone), shell=True)
     
-def update_roles_gce(use_cache=True, cache_expiration=86400, cache_path="~/.gcetools/instances", group_name=None, region=None, zone=None):
+def update_roles_gce(use_cache=True, cache_expiration=86400, cache_path="~/.gcetools/instances", group_name=None, region=None, zone=None, public_ips=True):
     """
     Dynamically update fabric's roles by using assigning the tags associated with
     each machine in Google Compute Engine.
@@ -213,6 +221,7 @@ def update_roles_gce(use_cache=True, cache_expiration=86400, cache_path="~/.gcet
     group_name - optional managed instance group to use instead of the global instance pool
     region - gce region name (such as `us-central1`) for a regional managed instance group
     zone - gce zone name (such as `us-central1-a`) for a zone managed instance group
+    public_ips - whether to use public or private ips (default: True)
 
     How to use:
     - Call 'update_roles_gce' at the end of your fabfile.py (it will run each
@@ -220,8 +229,8 @@ def update_roles_gce(use_cache=True, cache_expiration=86400, cache_path="~/.gcet
     - On each function use the regular @roles decorator and set the role to the name
       of one of the tags associated with the instances you wish to work with
     """
-    data = _get_data(use_cache, cache_expiration, group_name=group_name, region=region, zone=zone)
-    roles = _get_roles(data)
+    data = _get_data(use_cache, cache_expiration, group_name=group_name, region=region, zone=zone, public_ips=public_ips)
+    roles = _get_roles(data, public_ips)
     env.roledefs.update(roles)
 
     _data_loaded = True
