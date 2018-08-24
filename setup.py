@@ -30,7 +30,7 @@ setup(
     author_email="eran@sandler.co.il",
     url="http://github.com/erans/fabric-gce-tools",
     packages=find_packages(),
-    install_requires=["fabric"],
+    install_requires=["fabric==1.14.0"],
 
     extras_require={
         "test": ["nose", "coverage", "mock"]
